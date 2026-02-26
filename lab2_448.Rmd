@@ -1,0 +1,179 @@
+---
+title: "lab_2_stat448"
+author: "William Hui Chang"
+date: "2026-02-26"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Step 1: Load Required Packages
+
+Bla
+
+```{r loading packages}
+# install package e1071 (run install.packages just the once if needed),
+# or use the Tools -> Install Packages... option from the menu above.
+#install.packages("e1071")
+#install.packages("ggplot2")
+library(e1071)
+library(ggplot2)
+```
+
+
+
+## Step 2: Cars Dataset Description
+
+In industry settings, 
+  collaborate with 
+    experts 
+  clarify 
+    each variable’s 
+        meaning, 
+        significance, and 
+        units
+
+use ^ in the R console for details
+  ?cars
+
+
+
+## Step 3: Setting Up Your Workspace
+
+Check: Use getwd() to view the current directory path.
+Set: Use setwd(“P:/Your/Path/Here”) to change it.
+Manual Option: Click the “cog” icon under the “Files” tab to set the current directory.
+
+
+
+## Step 4: Exploratory Data Analysis (“EDA”)
+
+What is EDA?
+  involves analysing datasets to summarise key characteristics, often using visual methods. 
+  helping ^ before modelling or hypothesis testing
+    uncover patterns, 
+      identify anomalies, and 
+        validate assumptions 
+
+Origin of EDA
+  John Tukey popularised EDA in the 1970s
+    through his influential book Exploratory Data Analysis (1977)
+    
+Key Uses of EDA:
+  Data Cleaning: 
+    Identify and address missing values, duplicates, or inconsistencies.
+  Feature Engineering: 
+    Highlight relevant variables and create new features.
+  Model Selection: 
+    Guide the choice of algorithms for analysis.
+  Data Visualisation: 
+    Use plots (e.g., histograms, scatterplots, boxplots) to extract insights.
+  Error Detection: 
+    Spot anomalies that may bias results.
+  Hypothesis Generation: 
+    Form ideas for confirmatory analysis.
+
+
+
+## Step 5: Using EDA to Understand our Data
+
+explore the cars dataset to
+  Understand its structure.
+  Examine the relationship between speed and distance.
+  Assess the distribution of variables.
+  Detect any missing values or anomalies.
+
+  Task 1
+     investigate the usage of
+      dim()
+      str()
+      head()
+      names()
+
+
+```{r EDA exploring, echo=FALSE}
+# use the cars dataset and pass it into a function to understand its dimensions and structure.
+# Hint: overwrite the underscore with a function and the dataset
+dim(cars)
+str(cars)
+names(cars)
+dim(cars)
+```
+
+
+
+## Step 6: EDA - Graphing
+
+EDA: Scatter Plots
+
+```{r Scatterplot 1, echo=FALSE}
+# Simple Scatterplot
+plot(x = cars$speed, y = cars$dist, main = "Dist ~ Speed")
+```
+
+
+
+```{r Scatterplot 2, echo=FALSE}
+# Scatterplot with trend line
+scatter.smooth(x = cars$speed, y = cars$dist, main = "Dist ~ Speed")
+```
+
+
+  Task 2
+     measure the correlation between speed and stopping distance (dist)
+
+
+
+```{r correlation, echo=FALSE}
+# Calculate the correlation between speed and dist
+cor(cars$speed, cars$dist)
+```
+
+
+## Step 7: EDA: Scatter Plot - Improved Formatting
+
+
+```{r Scatterplot 3, echo=FALSE}
+# An improved Scatter Plot
+scatter.smooth(x = cars$speed, y = cars$dist, main = "Stopping Distance vs Speed", xlab = "Vehicle Speed (mph)", ylab = "Stopping Distance (ft)")
+```
+
+
+## Step 8: EDA: Boxplots
+
+par(mfrow()) function allows us to partition our plot window
+
+```{r box plot, echo=FALSE}
+# Partition plot window and create boxplots
+par(mfrow = c(1, 2))
+boxplot(cars$speed, main = "Speed (Mph)", sub = paste("Outlier rows: ", boxplot.stats(cars$speed)$out))
+boxplot(cars$dist, main = "Distance (ft)", sub = paste("Outlier rows: ", boxplot.stats(cars$dist)$out))
+```
+
+
+## Step 9: EDA: Density Plots
+
+```{r density 1, echo=FALSE}
+# density plot for 'speed'
+plot(density(cars$speed),
+  main="Density Plot: Speed (Mph)",
+  ylab="Frequency", sub=paste("Skewness:", round(e1071::skewness(cars$speed), 2)))
+polygon(density(cars$speed), col="red")
+
+```
+
+```{r density 2, echo=FALSE}
+# density plot for 'dist'
+
+plot(density(cars$dist),
+     main="Density Plot: Distance (ft)",
+     ylab= "Frequency", sub=paste("Skewness:", round(e1071::skewness(cars$dist), 2)))
+polygon(density(cars$dist), col='blue')
+
+```
+
+
+
+
