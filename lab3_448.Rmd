@@ -1,0 +1,253 @@
+---
+title: "lab_2_stat448"
+author: "William Hui Chang"
+date: "2026-02-26"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Step 0: Create and Understand our Data
+
+Bla
+
+```{r loading packages}
+# install package e1071 (run install.packages just the once if needed),
+# or use the Tools -> Install Packages... option from the menu above.
+#install.packages("e1071")
+#install.packages("ggplot2")
+# library(e1071)
+# library(ggplot2)
+```
+
+
+## Step 1: Create and Understand our Data
+
+Bla
+
+```{r create a dataset}
+# create our data using data.frame()
+data <- data.frame(x1 = c(0,1,1), y = c(2,2,8))
+data
+```
+
+
+Exploratory Data Analysis (EDA)
+  Even though our dataset is small, 
+    it is still important to 
+     graphically visualise our data
+  Here we can create a scatter plot 
+    to illustrate the relationship between Y and x1.
+
+
+```{r create a scatterplot}
+# create scatter plot
+plot(data, xlab = "x1", ylab = "y", main = "Y vs X1", xlim=c(-3, 3), ylim=c(0, 10))
+```
+
+
+
+
+## Step 2: Linear Regression Using Linear Algebra
+
+Using linear algebra and partial differentiation
+  we minimise the Mean Squared Error (MSE)
+    to derive the formula for estimating coefficients
+
+formula
+$$
+\hat{\beta} = (X^T X)^{-1} X^T Y
+$$
+
+To calculate, we need to calculate several Matrices.
+We need to:
+  (1) Create Design Matrix X
+  (2) Transpose our Design Matrix X, so we have XT
+  (3) Calculate XTX
+  (4) Find the inverse of XTX, so we have (XTX)−1
+  (5) Create Y vector,
+  (6) Calculate XTY, and finally;
+  (7) Calculate (XTX)−1 XTY to find β^
+
+
+(0) Create: The Intercept Vector
+
+```{r create Intercept Vector}
+# create a vector of 1s to use as our intercept
+# replicate 1 over the length of our y column from data, i.e, x0 is the same length of y
+
+x0 <- rep(1, length(data$y))
+x0
+```
+
+
+(1) Create Design Matrix X
+
+```{r create Design Matrix X}
+# Finally, lets combine our x0 and x1 to create our Design Matrix X
+
+X <- as.matrix(cbind(x0, x1 = data$x1))
+X
+
+# can check the dimension of a matrix by using 
+# dim(X)
+
+```
+
+(2) Create: Response Vector Y
+
+
+```{r create Response Vector Y}
+# create a vector for our Y values
+
+Y <- as.matrix(data$y)
+Y
+
+```
+
+
+(3) Create: Transpose of X
+
+
+```{r Create Transpose of X}
+# We have X and Y. 
+# Create X^T
+# Note: the transpose of X is found using t()
+
+XT <- t(X)  # X^T
+XT
+```
+
+
+
+## Step 4: Exploratory Data Analysis (“EDA”)
+
+What is EDA?
+  involves analysing datasets to summarise key characteristics, often using visual methods. 
+  helping ^ before modelling or hypothesis testing
+    uncover patterns, 
+      identify anomalies, and 
+        validate assumptions 
+
+Origin of EDA
+  John Tukey popularised EDA in the 1970s
+    through his influential book Exploratory Data Analysis (1977)
+    
+Key Uses of EDA:
+  Data Cleaning: 
+    Identify and address missing values, duplicates, or inconsistencies.
+  Feature Engineering: 
+    Highlight relevant variables and create new features.
+  Model Selection: 
+    Guide the choice of algorithms for analysis.
+  Data Visualisation: 
+    Use plots (e.g., histograms, scatterplots, boxplots) to extract insights.
+  Error Detection: 
+    Spot anomalies that may bias results.
+  Hypothesis Generation: 
+    Form ideas for confirmatory analysis.
+
+
+
+## Step 5: Using EDA to Understand our Data
+
+explore the cars dataset to
+  Understand its structure.
+  Examine the relationship between speed and distance.
+  Assess the distribution of variables.
+  Detect any missing values or anomalies.
+
+  Task 1
+     investigate the usage of
+      dim()
+      str()
+      head()
+      names()
+
+
+```{r EDA exploring, echo=FALSE}
+# use the cars dataset and pass it into a function to understand its dimensions and structure.
+# Hint: overwrite the underscore with a function and the dataset
+dim(cars)
+str(cars)
+names(cars)
+dim(cars)
+```
+
+
+
+## Step 6: EDA - Graphing
+
+EDA: Scatter Plots
+
+```{r Scatterplot 1, echo=FALSE}
+# Simple Scatterplot
+plot(x = cars$speed, y = cars$dist, main = "Dist ~ Speed")
+```
+
+
+
+```{r Scatterplot 2, echo=FALSE}
+# Scatterplot with trend line
+scatter.smooth(x = cars$speed, y = cars$dist, main = "Dist ~ Speed")
+```
+
+
+  Task 2
+     measure the correlation between speed and stopping distance (dist)
+
+
+
+```{r correlation, echo=FALSE}
+# Calculate the correlation between speed and dist
+cor(cars$speed, cars$dist)
+```
+
+
+## Step 7: EDA: Scatter Plot - Improved Formatting
+
+
+```{r Scatterplot 3, echo=FALSE}
+# An improved Scatter Plot
+scatter.smooth(x = cars$speed, y = cars$dist, main = "Stopping Distance vs Speed", xlab = "Vehicle Speed (mph)", ylab = "Stopping Distance (ft)")
+```
+
+
+## Step 8: EDA: Boxplots
+
+par(mfrow()) function allows us to partition our plot window
+
+```{r box plot, echo=FALSE}
+# Partition plot window and create boxplots
+par(mfrow = c(1, 2))
+boxplot(cars$speed, main = "Speed (Mph)", sub = paste("Outlier rows: ", boxplot.stats(cars$speed)$out))
+boxplot(cars$dist, main = "Distance (ft)", sub = paste("Outlier rows: ", boxplot.stats(cars$dist)$out))
+```
+
+
+## Step 9: EDA: Density Plots
+
+```{r density 1, echo=FALSE}
+# density plot for 'speed'
+plot(density(cars$speed),
+  main="Density Plot: Speed (Mph)",
+  ylab="Frequency", sub=paste("Skewness:", round(e1071::skewness(cars$speed), 2)))
+polygon(density(cars$speed), col="red")
+
+```
+
+```{r density 2, echo=FALSE}
+# density plot for 'dist'
+
+plot(density(cars$dist),
+     main="Density Plot: Distance (ft)",
+     ylab= "Frequency", sub=paste("Skewness:", round(e1071::skewness(cars$dist), 2)))
+polygon(density(cars$dist), col='blue')
+
+```
+
+
+
+
