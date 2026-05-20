@@ -1,0 +1,428 @@
+---
+title: "STAT448 Assignment 3 – Question 3: Hyperparameter Tuning on CIFAR-10"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    theme: cosmo
+    self-contained: true
+jupyter: python3
+---
+
+## Setup
+
+### Imports
+
+```{python}
+#| label: imports
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import random
+import time
+import joblib
+
+import tensorflow as tf
+from tensorflow import keras
+import keras_tuner as kt
+import optuna
+```
+
+### Global Configuration
+
+```{python}
+#| label: global-config
+SEED       = 2026
+INPUT_DIM  = 3072
+BEY_TRIALS = 15
+EPOCHS     = 3
+```
+
+### Helper Functions
+
+`show_results_table` formats a list of training result dicts into a readable `DataFrame`.
+
+```{python}
+#| label: helper-show-results
+def show_results_table(results):
+    rows = []
+    for i, r in enumerate(results, 1):
+        arch = (
+            ",".join(str(n) for n in r["num_neurons"])
+            if isinstance(r["num_neurons"], list)
+            else str(r["num_neurons"])
+        )
+        rows.append({
+            "Run":         i - 1,
+            "Config":      r["config"],
+            "LR (log10)":  round(np.log10(r["lr"]), 4),
+            "Batch (2^b)": int(np.log2(r["batch_size"])),
+            "Opt":         r["optimizer"],
+            "Arch":        arch,
+            "Act":         r["activation"],
+            "Train Acc":   r["train_acc"],
+            "Val Acc":     r["val_acc"],
+            "Test Acc":    r["test_acc"],
+            "Time (s)":    r["time_s"],
+        })
+    df = pd.DataFrame(rows)
+    print(df.to_string(index=False))
+    return df
+```
+
+`plot_val_loss` draws per-epoch validation loss curves for selected configurations.
+
+```{python}
+#| label: helper-plot-val-loss
+def plot_val_loss(results, configs=None):
+    plt.figure(figsize=(10, 5))
+    for r in results:
+        if configs is None or r["config"] in configs:
+            plt.plot(r["history"].history["val_loss"], label=r["config"])
+    plt.xlabel("Epoch")
+    plt.ylabel("Val Loss")
+    plt.xticks(range(r["num_epochs"]))
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+```
+
+---
+
+## Data
+
+### Loading CIFAR-10
+
+```{python}
+#| label: data-loading
+from keras.datasets import cifar10
+
+(x_train, y_train), (x_test, y_test) = cifar10.load_data()
+```
+
+### Flattening Labels
+
+CIFAR-10 labels come as shape `(N, 1)`; flatten to `(N,)` for sparse cross-entropy.
+
+```{python}
+#| label: data-flatten
+y_train = y_train.flatten()
+y_test  = y_test.flatten()
+
+print("Training data shape: ", x_train.shape)   # (50000, 32, 32, 3)
+print("Test data shape:     ", x_test.shape)    # (10000, 32, 32, 3)
+print("Unique labels — train:", len(np.unique(y_train)))
+print("Unique labels — test: ", len(np.unique(y_test)))
+```
+
+### Sample Images
+
+One random example per class to confirm the data loaded correctly.
+
+```{python}
+#| label: data-viz
+labels_text = [
+    "Airplane", "Automobile", "Bird", "Cat", "Deer",
+    "Dog", "Frog", "Horse", "Ship", "Truck",
+]
+
+unique_labels = np.unique(y_train)
+plt.figure(figsize=(10, 4))
+for i, label in enumerate(unique_labels):
+    idx = np.where(y_train == label)[0]
+    random_idx = np.random.choice(idx)
+    plt.subplot(2, 5, i + 1)
+    plt.imshow(x_train[random_idx])
+    plt.title(labels_text[label])
+    plt.axis("off")
+plt.tight_layout()
+plt.show()
+```
+
+### Reshaping & Normalising
+
+Flatten each `32×32×3` image to a 3 072-dimensional vector and scale to `[0, 1]`.
+
+```{python}
+#| label: data-reshape
+x_train = x_train.reshape(-1, 3072).astype("float32") / 255.0
+x_test  = x_test.reshape(-1,  3072).astype("float32") / 255.0
+
+print("After reshape — Train:", x_train.shape)   # (50000, 3072)
+print("After reshape — Test: ", x_test.shape)    # (10000, 3072)
+```
+
+---
+
+## Bayesian Hyperparameter Search (Optuna)
+
+We use Optuna's **TPE sampler** to search over:
+
+| Parameter | Search space |
+|-----------|-------------|
+| Learning rate | $\eta = 10^l$, $l \sim \mathcal{U}(-5,\,-1)$ |
+| Batch size | $2^b$, $b \sim \mathcal{U}_{\mathbb{Z}}(4,\,9)$ |
+| Optimizer | SGD, SGD+momentum, Adagrad, RMSProp, Adam |
+| Architecture | 64 / 256 / 64,64 / 256,256 / 256,64 / 256,128,64 |
+| Activation | ReLU, Sigmoid, Tanh |
+
+Each trial is trained for **`EPOCHS = 3`** epochs with a 10 % validation split.
+
+```{python}
+#| label: optuna-search
+#| warning: false
+print("=== Running Optuna Bayesian Search ===\n")
+
+random.seed(SEED)
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
+
+
+def objective(trial):
+    lr            = 10 ** trial.suggest_float("l", -5, -1)
+    batch_size    = 2 ** trial.suggest_int("b", 4, 9)
+    optimizer_name = trial.suggest_categorical(
+        "optimizer", ["sgd", "sgd_momentum", "adagrad", "rmsprop", "adam"]
+    )
+    architecture  = trial.suggest_categorical(
+        "architecture", ["64", "256", "64,64", "256,256", "256,64", "256,128,64"]
+    )
+    layers        = [int(x) for x in architecture.split(",")]
+    activation    = trial.suggest_categorical("activation", ["relu", "sigmoid", "tanh"])
+
+    # Build model
+    model = keras.Sequential()
+    model.add(keras.layers.Input(shape=(INPUT_DIM,)))
+    for units in layers:
+        model.add(keras.layers.Dense(units, activation=activation))
+    model.add(keras.layers.Dense(10, activation="softmax"))
+
+    # Optimizer
+    opt_map = {
+        "sgd":          keras.optimizers.SGD(learning_rate=lr),
+        "sgd_momentum": keras.optimizers.SGD(learning_rate=lr, momentum=0.9),
+        "adagrad":      keras.optimizers.Adagrad(learning_rate=lr),
+        "rmsprop":      keras.optimizers.RMSprop(learning_rate=lr),
+        "adam":         keras.optimizers.Adam(learning_rate=lr),
+    }
+    model.compile(
+        optimizer=opt_map[optimizer_name],
+        loss="sparse_categorical_crossentropy",
+        metrics=["accuracy"],
+    )
+
+    history = model.fit(
+        x_train, y_train,
+        epochs=EPOCHS,
+        batch_size=batch_size,
+        validation_split=0.1,
+        verbose=0,
+    )
+    return max(history.history["val_accuracy"])
+
+
+optuna.logging.set_verbosity(optuna.logging.INFO)
+study = optuna.create_study(
+    direction="maximize",
+    sampler=optuna.samplers.TPESampler(seed=SEED),
+)
+study.optimize(objective, n_trials=BEY_TRIALS)
+
+print(f"\nBest trial:")
+print(f"  val_accuracy : {study.best_value:.4f}")
+print(f"  params       : {study.best_params}")
+```
+
+### Trials Summary
+
+```{python}
+#| label: optuna-summary
+print("=== Optuna Trials Summary ===\n")
+df_trials = study.trials_dataframe()
+cols = [
+    "number", "value", "params_optimizer", "params_activation",
+    "params_architecture", "params_l", "params_b",
+]
+print(df_trials[cols].sort_values("value", ascending=False).to_string(index=False))
+```
+
+### Load 20-Epoch Study
+
+The search above uses only 3 epochs for speed. A pre-saved study trained for **20 epochs** gives more reliable best parameters.
+
+```{python}
+#| label: load-study
+# Uncomment to save the 3-epoch study:
+# joblib.dump(study, "optuna_study_3epochs.pkl")
+
+study = joblib.load("optuna_study_20epochs.pkl")
+print(f"Loaded study — best val: {study.best_value:.4f}")
+```
+
+### Best Bayesian Parameters
+
+```{python}
+#| label: best-params
+params_beyesian = study.best_params
+
+for k, v in params_beyesian.items():
+    print(f"  {k}: {v}")
+```
+
+---
+
+## Manual Hyperparameter Exploration
+
+### Training Helper
+
+`manual_training` builds, trains, and evaluates a model given a parameter dict.
+
+```{python}
+#| label: manual-training-fn
+def manual_training(dict_params, num_epochs=EPOCHS, ver_bose=0, config_name=""):
+    lr             = 10 ** dict_params["l"]
+    batch_size     = 2 ** dict_params["b"]
+    optimizer_name = dict_params["optimizer"]
+    activation     = dict_params["activation"]
+    layers         = [int(x) for x in dict_params["architecture"].split(",")]
+
+    random.seed(SEED)
+    np.random.seed(SEED)
+    tf.random.set_seed(SEED)
+
+    model = keras.Sequential()
+    model.add(keras.layers.Input(shape=(INPUT_DIM,)))
+    for units in layers:
+        model.add(keras.layers.Dense(units, activation=activation))
+    model.add(keras.layers.Dense(10, activation="softmax"))
+
+    opt_map = {
+        "sgd":          keras.optimizers.SGD(learning_rate=lr),
+        "sgd_momentum": keras.optimizers.SGD(learning_rate=lr, momentum=0.9),
+        "adagrad":      keras.optimizers.Adagrad(learning_rate=lr),
+        "rmsprop":      keras.optimizers.RMSprop(learning_rate=lr),
+        "adam":         keras.optimizers.Adam(learning_rate=lr),
+    }
+    model.compile(
+        optimizer=opt_map[optimizer_name],
+        loss="sparse_categorical_crossentropy",
+        metrics=["accuracy"],
+    )
+
+    start   = time.time()
+    history = model.fit(
+        x_train, y_train,
+        epochs=num_epochs,
+        batch_size=batch_size,
+        validation_split=0.1,
+        verbose=ver_bose,
+    )
+    elapsed = round(time.time() - start, 2)
+
+    _, test_acc = model.evaluate(x_test, y_test, verbose=0)
+    val_acc     = max(history.history["val_accuracy"])
+    train_acc   = max(history.history["accuracy"])
+
+    print(f"  [{config_name}] train={train_acc:.4f}  val={val_acc:.4f}  test={test_acc:.4f}")
+
+    return {
+        "config":      config_name,
+        "num_neurons": layers,
+        "num_layers":  len(layers),
+        "lr":          lr,
+        "optimizer":   optimizer_name,
+        "activation":  activation,
+        "batch_size":  batch_size,
+        "num_epochs":  num_epochs,
+        "train_acc":   round(train_acc, 4),
+        "val_acc":     round(val_acc, 4),
+        "test_acc":    round(test_acc, 4),
+        "time_s":      elapsed,
+        "history":     history,
+    }
+```
+
+### Optuna Best Baseline
+
+Reproduce the Optuna best configuration as run 0.
+
+```{python}
+#| label: run-optuna-best
+results = []
+results.append(manual_training(params_beyesian, ver_bose=1, config_name="optuna_best"))
+
+df_results = show_results_table(results)
+```
+
+### Parameter Grid
+
+Fix the LR and batch size from Bayesian search; vary optimizer, architecture, and activation manually.
+
+```{python}
+#| label: param-grid
+constant_part = {
+    "l": params_beyesian["l"],
+    "b": params_beyesian["b"],
+}
+
+varied_part = [
+    {"name": "manual_one",   "optimizer": "adam",         "architecture": "256,256",                 "activation": "sigmoid"},
+    {"name": "manual_two",   "optimizer": "adam",         "architecture": "256,256,256,256",         "activation": "sigmoid"},
+    {"name": "manual_three", "optimizer": "adam",         "architecture": "256,256,256,256,256,256", "activation": "sigmoid"},
+    {"name": "manual_four",  "optimizer": "adam",         "architecture": "256,256",                 "activation": "relu"},
+    {"name": "manual_five",  "optimizer": "adam",         "architecture": "256,256,256,256",         "activation": "relu"},
+    {"name": "manual_six",   "optimizer": "adam",         "architecture": "256,256,256,256,256,256", "activation": "relu"},
+    {"name": "manual_seven", "optimizer": "rmsprop",      "architecture": "256,256",                 "activation": "relu"},
+    {"name": "manual_eight", "optimizer": "adagrad",      "architecture": "256,256",                 "activation": "relu"},
+    {"name": "manual_nine",  "optimizer": "sgd_momentum", "architecture": "256,256",                 "activation": "relu"},
+]
+
+param_sets = {
+    v["name"]: {**constant_part, **{k: val for k, val in v.items() if k != "name"}}
+    for v in varied_part
+}
+```
+
+### Training All Configurations
+
+```{python}
+#| label: run-all-configs
+results.append(manual_training(param_sets["manual_one"],   config_name="manual_one"))
+results.append(manual_training(param_sets["manual_two"],   config_name="manual_two"))
+results.append(manual_training(param_sets["manual_three"], config_name="manual_three"))
+results.append(manual_training(param_sets["manual_four"],  config_name="manual_four"))
+results.append(manual_training(param_sets["manual_five"],  config_name="manual_five"))
+results.append(manual_training(param_sets["manual_six"],   config_name="manual_six"))
+results.append(manual_training(param_sets["manual_seven"], config_name="manual_seven"))
+results.append(manual_training(param_sets["manual_eight"], config_name="manual_eight"))
+results.append(manual_training(param_sets["manual_nine"],  config_name="manual_nine"))
+```
+
+---
+
+## Results Comparison
+
+### Full Results Table
+
+```{python}
+#| label: full-results-table
+df_results = show_results_table(results)
+```
+
+### Validation Loss Curves
+
+All configurations:
+
+```{python}
+#| label: plot-all
+plot_val_loss(results)
+```
+
+Selected comparison — Optuna best vs `manual_one`:
+
+```{python}
+#| label: plot-selected
+plot_val_loss(results, configs=["optuna_best", "manual_one"])
+```
